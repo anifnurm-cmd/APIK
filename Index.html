@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#0f172a" />
+  <title>APIK - Aplikasi Perencanaan Individu Karir</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      background-color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* Layar loading sementara saat Google Apps Script memuat */
+    #loader {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: #f8fafc;
+      color: #334155;
+      transition: opacity 0.3s ease, visibility 0.3s ease;
+    }
+
+    #loader.hidden {
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid #cbd5e1;
+      border-top-color: #1d4ed8;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Banner peringatan khusus jika dibuka dari browser dalam aplikasi (WA/IG/FB) */
+    #inapp-banner {
+      display: none;
+      position: fixed;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
+      z-index: 60;
+      background: #0f172a;
+      color: #f8fafc;
+      padding: 12px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      line-height: 1.4;
+      box-shadow: 0 10px 25px rgba(15, 23, 42, 0.25);
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    #inapp-banner button {
+      background: #334155;
+      color: #fff;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    #app-frame {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: none;
+      background: #ffffff;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="loader">
+    <div class="spinner"></div>
+    <div style="font-size: 14px; font-weight: 500;">Memuat aplikasi...</div>
+  </div>
+
+  <div id="inapp-banner">
+    <span>Untuk kelancaran unduh PDF &amp; gambar, disarankan klik menu titik tiga lalu pilih <b>Buka di Chrome / Safari</b>.</span>
+    <button type="button" onclick="document.getElementById('inapp-banner').style.display='none'">Tutup</button>
+  </div>
+
+  <!--
+    PENTING: Sengaja TIDAK memasang atribut sandbox="..." yang ketat pada iframe ini,
+    karena Google Apps Script sudah melakukan sandboxing internal. Menambahkan sandbox
+    sering memblokir allow-downloads, window.print(), dan popup eksternal.
+  -->
+  <iframe
+    id="app-frame"
+    title="Web App Container"
+    allow="clipboard-read; clipboard-write; fullscreen; autoplay"
+    allowfullscreen
+    referrerpolicy="no-referrer-when-downgrade"
+  ></iframe>
+
+  <script>
+    (function () {
+      const GAS_EXEC_URL = "https://script.google.com/macros/s/AKfycbwYyD1YwOE9llYmcJbTvI06NmAagDJ0IoKGkwSrIOYZg-99rFfYnGQHNxHSqrDwDvq_/exec";
+      const iframe = document.getElementById("app-frame");
+      const loader = document.getElementById("loader");
+
+      // Teruskan query parameter dari URL GitHub Pages (jika ada) ke URL Apps Script
+      const query = window.location.search || "";
+      iframe.src = GAS_EXEC_URL + query;
+
+      iframe.addEventListener("load", function () {
+        loader.classList.add("hidden");
+      });
+
+      // Fallback menyembunyikan loader jika event load tertahan
+      setTimeout(function () {
+        loader.classList.add("hidden");
+      }, 8000);
+
+      // Deteksi in-app browser (WhatsApp / Instagram / Facebook / Line) yang sering memblokir unduhan
+      const ua = navigator.userAgent || "";
+      if (/FBAN|FBAV|Instagram|Line|MicroMessenger|WhatsApp/i.test(ua)) {
+        document.getElementById("inapp-banner").style.display = "flex";
+      }
+
+      /**
+       * Helper konversi Base64 atau Data URL menjadi Blob agar stabil di semua browser
+       */
+      function base64ToBlob(base64OrDataUrl, fallbackMime) {
+        let mime = fallbackMime || "application/octet-stream";
+        let pureBase64 = base64OrDataUrl;
+
+        if (base64OrDataUrl.indexOf("data:") === 0 && base64OrDataUrl.indexOf(",") !== -1) {
+          const parts = base64OrDataUrl.split(",");
+          const mimeMatch = parts[0].match(/data:([^;]+);base64/i);
+          if (mimeMatch) mime = mimeMatch[1];
+          pureBase64 = parts[1];
+        }
+
+        const binaryString = atob(pureBase64);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: mime });
+      }
+
+      /**
+       * Eksekusi unduhan di level Top-Window (GitHub Pages) agar tidak diblokir kebijakan iframe lintas-domain
+       */
+      function downloadBlobTopLevel(blob, fileName) {
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = fileName || "unduhan";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+
+        // Beri jeda 15 detik sebelum revoke agar browser mobile sempat menyelesaikan inisiasi unduhan
+        setTimeout(function () {
+          URL.revokeObjectURL(blobUrl);
+        }, 15000);
+      }
+
+      /**
+       * Bridge Listener: Menerima perintah unduh PDF, unduh gambar (sosiogram/chart), cetak HTML, atau buka link dari GAS
+       */
+      window.addEventListener("message", function (event) {
+        // Validasi origin agar hanya menerima pesan dari Google Apps Script
+        const origin = event.origin || "";
+        const isValidGasOrigin =
+          origin === "https://script.google.com" ||
+          origin.endsWith(".googleusercontent.com");
+
+        if (!isValidGasOrigin || !event.data || typeof event.data !== "object") {
+          return;
+        }
+
+        const msg = event.data;
+
+        try {
+          // 1. Unduh file dari Base64 (misal: hasil generateOfficialStudentPdf)
+          if (msg.type === "DOWNLOAD_BASE64" && msg.base64) {
+            const blob = base64ToBlob(msg.base64, msg.mimeType || "application/pdf");
+            downloadBlobTopLevel(blob, msg.fileName || "dokumen.pdf");
+          }
+
+          // 2. Unduh gambar dari Data URL (misal: canvas.toDataURL('image/png') untuk Sosiogram / Grafik Radar)
+          else if (msg.type === "DOWNLOAD_DATAURL" && msg.dataUrl) {
+            const blob = base64ToBlob(msg.dataUrl, msg.mimeType || "image/png");
+            downloadBlobTopLevel(blob, msg.fileName || "gambar.png");
+          }
+
+          // 3. Cetak HTML di tab baru yang bersih (mengatasi window.print() yang terpotong/gagal di iframe)
+          else if (msg.type === "PRINT_HTML" && msg.html) {
+            const printWin = window.open("", "_blank");
+            if (printWin) {
+              printWin.document.open();
+              printWin.document.write(msg.html);
+              printWin.document.close();
+              printWin.focus();
+              setTimeout(function () {
+                printWin.print();
+              }, 500);
+            }
+          }
+
+          // 4. Buka tautan eksternal (WhatsApp, Google Form, dll.) tanpa terblokir iframe
+          else if (msg.type === "OPEN_URL" && msg.url) {
+            window.open(msg.url, "_blank", "noopener,noreferrer");
+          }
+        } catch (err) {
+          console.error("Gagal memproses pesan dari iframe GAS:", err);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
